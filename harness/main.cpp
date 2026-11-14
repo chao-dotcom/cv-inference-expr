@@ -25,6 +25,7 @@ constexpr int kInputH = 640;
 constexpr int kNumClasses = 80;
 constexpr int kNumPreds = 8400;
 constexpr int kOutputChannels = 4 + kNumClasses;
+constexpr int kMaxDetections = 300;
 
 const std::vector<int> kCoco80To91 = {
     1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
@@ -72,10 +73,11 @@ struct AppConfig {
   std::string slice_json;
   std::string out_json = "results.json";
   std::string data_root = "data/val2017";
-  float conf_thresh = 0.25f;
-  float nms_iou_thresh = 0.45f;
-  int warmup_iters = 20;
-  int bench_iters = 300;
+  float conf_thresh = 0.001f;
+  float nms_iou_thresh = 0.7f;
+  int warmup_iters = 50;
+  int bench_iters = 1000;
+  std::string latency_csv = "latency.csv";
   int max_images = -1;
 };
 
@@ -296,7 +298,14 @@ std::vector<Detection> DecodeYoloOutput(const std::vector<float>& output, const 
     candidates.push_back(d);
   }
 
-  return GreedyNmsPerClass(candidates, nms_iou_thresh);
+  std::vector<Detection> kept = GreedyNmsPerClass(candidates, nms_iou_thresh);
+  std::sort(kept.begin(), kept.end(), [](const Detection& lhs, const Detection& rhs) {
+    return lhs.score > rhs.score;
+  });
+  if (kept.size() > kMaxDetections) {
+    kept.resize(kMaxDetections);
+  }
+  return kept;
 }
 
 std::string EscapeJson(const std::string& s) {
@@ -344,8 +353,8 @@ AppConfig ParseArgs(int argc, char** argv) {
   if (argc < 3) {
     throw std::runtime_error(
         "Usage: trt_yolo_bench <engine_path> <slice_json> [--out results.json] "
-        "[--data-root data/val2017] [--conf 0.25] [--nms 0.45] [--warmup 20] "
-        "[--iters 300] [--max-images -1]");
+        "[--data-root data/val2017] [--conf 0.001] [--nms 0.7] [--warmup 50] "
+        "[--iters 1000] [--latency-out latency.csv] [--max-images -1]");
   }
 
   AppConfig cfg;
@@ -374,6 +383,8 @@ AppConfig ParseArgs(int argc, char** argv) {
       cfg.warmup_iters = std::stoi(next());
     } else if (key == "--iters") {
       cfg.bench_iters = std::stoi(next());
+    } else if (key == "--latency-out") {
+      cfg.latency_csv = next();
     } else if (key == "--max-images") {
       cfg.max_images = std::stoi(next());
     } else {
@@ -477,6 +488,10 @@ int main(int argc, char** argv) {
 
     cudaStream_t stream = nullptr;
     CheckCuda(cudaStreamCreate(&stream), "cudaStreamCreate failed");
+    cudaEvent_t gpu_start = nullptr;
+    cudaEvent_t gpu_end = nullptr;
+    CheckCuda(cudaEventCreate(&gpu_start), "cudaEventCreate gpu_start failed");
+    CheckCuda(cudaEventCreate(&gpu_end), "cudaEventCreate gpu_end failed");
 
     if (!context->setTensorAddress(input_name.c_str(), device_input) ||
         !context->setTensorAddress(output_name.c_str(), device_output)) {
@@ -522,33 +537,63 @@ int main(int argc, char** argv) {
     }
 
     std::vector<double> inference_ms;
+    std::vector<double> gpu_ms;
+    std::vector<float> timing_output(output_elems, 0.0f);
     inference_ms.reserve(static_cast<size_t>(cfg.bench_iters));
+    gpu_ms.reserve(static_cast<size_t>(cfg.bench_iters));
+    std::ofstream latency_csv(cfg.latency_csv);
+    if (!latency_csv) {
+      throw std::runtime_error("Unable to open latency CSV for writing: " + cfg.latency_csv);
+    }
+    latency_csv << "iteration,e2e_ms,gpu_ms\n";
     for (int i = 0; i < cfg.bench_iters; ++i) {
       const size_t idx = static_cast<size_t>(i) % cache_count;
+      const auto start = std::chrono::steady_clock::now();
       CheckCuda(cudaMemcpyAsync(device_input, cached_inputs[idx].data(), input_elems * sizeof(float),
                                 cudaMemcpyHostToDevice, stream),
                 "Benchmark H2D failed");
 
+<<<<<<< Updated upstream
       const auto start = std::chrono::high_resolution_clock::now();
       if (!context->enqueueV3(stream)) {
         throw std::runtime_error("enqueueV3 failed during benchmark");
+=======
+      CheckCuda(cudaEventRecord(gpu_start, stream), "GPU start event failed");
+      if (!context->enqueueV2(bindings.data(), stream, nullptr)) {
+        throw std::runtime_error("enqueueV2 failed during benchmark");
+>>>>>>> Stashed changes
       }
+      CheckCuda(cudaEventRecord(gpu_end, stream), "GPU end event failed");
+      CheckCuda(cudaMemcpyAsync(timing_output.data(), device_output, output_elems * sizeof(float),
+                                cudaMemcpyDeviceToHost, stream),
+                "Benchmark D2H failed");
       CheckCuda(cudaStreamSynchronize(stream), "Benchmark synchronize failed");
-      const auto end = std::chrono::high_resolution_clock::now();
+      const auto end = std::chrono::steady_clock::now();
 
       const double ms = std::chrono::duration<double, std::milli>(end - start).count();
+      float gpu_elapsed = 0.0f;
+      CheckCuda(cudaEventElapsedTime(&gpu_elapsed, gpu_start, gpu_end),
+                "GPU event elapsed time failed");
       inference_ms.push_back(ms);
+      gpu_ms.push_back(static_cast<double>(gpu_elapsed));
+      latency_csv << i << "," << std::fixed << std::setprecision(6) << ms << ","
+                  << gpu_elapsed << "\n";
     }
+    latency_csv.close();
 
-    const double mean_ms = std::accumulate(inference_ms.begin(), inference_ms.end(), 0.0) /
+    const double mean_ms = std::accumulate(gpu_ms.begin(), gpu_ms.end(), 0.0) /
+                           static_cast<double>(gpu_ms.size());
+    const double e2e_mean_ms = std::accumulate(inference_ms.begin(), inference_ms.end(), 0.0) /
                            static_cast<double>(inference_ms.size());
-    const double p50_ms = PercentileMs(inference_ms, 0.50);
-    const double p99_ms = PercentileMs(inference_ms, 0.99);
+    const double p50_ms = PercentileMs(gpu_ms, 0.50);
+    const double p99_ms = PercentileMs(gpu_ms, 0.99);
     const double fps = 1000.0 / mean_ms;
 
     std::cout << std::fixed << std::setprecision(3);
-    std::cout << "[bench] mean_ms=" << mean_ms << " p50_ms=" << p50_ms << " p99_ms=" << p99_ms
-              << " fps=" << fps << "\n";
+    std::cout << "[bench] gpu_mean_ms=" << mean_ms << " gpu_p50_ms=" << p50_ms
+              << " gpu_p99_ms=" << p99_ms << " e2e_mean_ms=" << e2e_mean_ms
+              << " fps=" << fps << " samples=" << gpu_ms.size()
+              << " latency_csv=" << cfg.latency_csv << "\n";
 
     std::vector<float> host_output(output_elems, 0.0f);
     std::vector<std::pair<int, Detection>> coco_rows;
@@ -583,6 +628,8 @@ int main(int argc, char** argv) {
     WriteCocoResultsJson(cfg.out_json, coco_rows);
     std::cout << "[write] " << cfg.out_json << " detections=" << coco_rows.size() << "\n";
 
+    cudaEventDestroy(gpu_end);
+    cudaEventDestroy(gpu_start);
     cudaStreamDestroy(stream);
     cudaFree(device_output);
     cudaFree(device_input);

@@ -11,16 +11,16 @@ from typing import Iterable
 
 import requests
 
-ANNOTATIONS_URL = "http://images.cocodataset.org/annotations/annotations_trainval2017.zip"
-VAL_IMAGE_URL = "http://images.cocodataset.org/val2017/{file_name}"
-TRAIN_IMAGE_URL = "http://images.cocodataset.org/train2017/{file_name}"
+ANNOTATIONS_URL = "https://images.cocodataset.org/annotations/annotations_trainval2017.zip"
+VAL_IMAGE_URL = "https://images.cocodataset.org/val2017/{file_name}"
+TRAIN_IMAGE_URL = "https://images.cocodataset.org/train2017/{file_name}"
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-dir", type=Path, default=Path("data"))
     parser.add_argument("--val-count", type=int, default=1000)
-    parser.add_argument("--calib-count", type=int, default=200)
+    parser.add_argument("--calib-count", type=int, default=500)
     parser.add_argument("--timeout", type=int, default=30)
     return parser.parse_args()
 
@@ -100,6 +100,11 @@ def main() -> None:
 
     val_slice = build_slice(val_instances, args.val_count, val_slice_path)
     calib_slice = build_slice(train_instances, args.calib_count, calib_slice_path)
+    val_ids = {int(record["id"]) for record in val_slice}
+    calib_ids = {int(record["id"]) for record in calib_slice}
+    overlap = val_ids & calib_ids
+    if overlap:
+        raise ValueError(f"Evaluation and calibration slices overlap: {sorted(overlap)[:5]}")
 
     download_images(val_slice, VAL_IMAGE_URL, data_dir / "val2017", timeout_s=args.timeout)
     download_images(calib_slice, TRAIN_IMAGE_URL, data_dir / "train2017", timeout_s=args.timeout)

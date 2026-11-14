@@ -29,6 +29,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--calib-cache", type=Path, default=Path("calib.cache"))
     parser.add_argument("--calib-batch-size", type=int, default=8)
     parser.add_argument("--input-size", type=int, default=640)
+    parser.add_argument(
+        "--model-name",
+        type=str,
+        default=None,
+        help="Engine filename stem. Defaults to the ONNX filename stem.",
+    )
     return parser.parse_args()
 
 
@@ -85,6 +91,7 @@ def main() -> None:
 
     args.engines_dir.mkdir(parents=True, exist_ok=True)
     workspace_bytes = int(args.workspace_gb * (1 << 30))
+    model_name = args.model_name or args.onnx.stem
 
     calibrator = None
     if not args.calib_slice.exists():
@@ -114,7 +121,7 @@ def main() -> None:
             calibrator=calibrator,
         )
 
-        engine_path = args.engines_dir / f"yolo11n_{precision}.engine"
+        engine_path = args.engines_dir / f"{model_name}_{precision}.engine"
         engine_path.write_bytes(plan)
         print(f"[write] {engine_path} ({len(plan) / (1024 * 1024):.2f} MB)")
 

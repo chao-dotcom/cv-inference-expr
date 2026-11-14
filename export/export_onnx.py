@@ -45,6 +45,7 @@ def main() -> None:
         format="onnx",
         imgsz=args.imgsz,
         opset=args.opset,
+        simplify=True,
         dynamic=False,
     )
 
