@@ -89,7 +89,12 @@ def resolve_image_paths(records: Iterable[dict[str, object]], image_dir: Path) -
     return paths
 
 
-class CocoInt8EntropyCalibrator(trt.IInt8EntropyCalibrator2):
+_CALIBRATOR_BASE = getattr(trt, "IInt8EntropyCalibrator2", None)
+
+
+if _CALIBRATOR_BASE is not None:
+
+  class CocoInt8EntropyCalibrator(_CALIBRATOR_BASE):
     def __init__(
         self,
         image_paths: Sequence[Path],
@@ -143,3 +148,14 @@ class CocoInt8EntropyCalibrator(trt.IInt8EntropyCalibrator2):
     def write_calibration_cache(self, cache: bytes) -> None:
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
         self.cache_path.write_bytes(cache)
+
+else:
+
+    class CocoInt8EntropyCalibrator:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            del args, kwargs
+            raise RuntimeError(
+                "This TensorRT version removed IInt8EntropyCalibrator2. "
+                "Use TensorRT 10.x for legacy calibrator-based INT8, or provide "
+                "an explicitly quantized ONNX model with Q/DQ nodes for TensorRT 11+."
+            )

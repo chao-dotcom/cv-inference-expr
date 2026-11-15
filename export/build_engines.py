@@ -87,9 +87,16 @@ def main() -> None:
     model_name = args.model_name or args.onnx.stem
 
     calibrator = None
+    legacy_int8_available = hasattr(trt, "IInt8EntropyCalibrator2")
+    if not legacy_int8_available:
+        print(
+            "[warn] TensorRT removed IInt8EntropyCalibrator2; "
+            "legacy calibrator-based INT8 is unavailable. "
+            "FP32/FP16 will be built, INT8 will be skipped."
+        )
     if not args.calib_slice.exists():
         print(f"[warn] calibration slice missing: {args.calib_slice}")
-    else:
+    elif legacy_int8_available:
         records = load_slice_records(args.calib_slice)
         image_paths = resolve_image_paths(records, args.calib_image_dir)
         calibrator = CocoInt8EntropyCalibrator(
@@ -102,7 +109,7 @@ def main() -> None:
     targets = ("fp32", "fp16", "int8")
     for precision in targets:
         if precision == "int8" and calibrator is None:
-            print("[skip] INT8 build skipped because calibration data is unavailable")
+            print("[skip] INT8 build skipped because this TensorRT API has no legacy calibrator")
             continue
 
         print(f"[build] precision={precision}")
