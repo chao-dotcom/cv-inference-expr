@@ -5,7 +5,7 @@
 ultralytics>=8.3          # YOLO11n model + ONNX export
 onnx>=1.16
 tensorrt                  # Builder API + Python runtime for calibration/sanity checks (CUDA box only)
-cuda-python               # CUDA driver API used by the INT8 calibrator on modern Colab runtimes
+nvidia-modelopt           # Explicit FP16 conversion and ONNX quantization on TensorRT 11
 numpy
 opencv-python
 pycocotools

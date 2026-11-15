@@ -69,16 +69,18 @@ evaluation and calibration image IDs are disjoint.
 
 ```bash
 !python export/export_onnx.py --weights yolo11n.pt --out-dir models
+!python export/convert_fp16.py --input models/yolo11n.onnx --output models/yolo11n_fp16.onnx
 !python export/build_engines.py \
     --onnx models/yolo11n.onnx \
+    --fp16-onnx models/yolo11n_fp16.onnx \
     --engines-dir engines \
-    --calib-slice data/calib_slice.json \
-    --calib-cache calib.cache 2>&1 | tee build.log
+    2>&1 | tee build.log
 ```
 
-The build produces `yolo11n_fp32.engine`, `yolo11n_fp16.engine`, and
-`yolo11n_int8.engine`. Re-run the build with the same cache and retain both
-logs to verify calibration-cache reuse.
+The build produces `yolo11n_fp32.engine` and `yolo11n_fp16.engine`. TensorRT
+11 does not accept the legacy Python INT8 calibrator; INT8 must first be
+represented by an explicitly quantized ONNX graph with Q/DQ nodes. Once such a
+graph exists, add `--int8-onnx models/yolo11n_int8.onnx` to the build command.
 
 ## 7. Build the C++ harness
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build TensorRT engines at FP32, FP16, and INT8."""
+"""Build TensorRT engines from explicitly typed ONNX graphs."""
 
 from __future__ import annotations
 
@@ -9,19 +9,13 @@ from pathlib import Path
 
 import tensorrt as trt
 
-from calibrator import CocoInt8EntropyCalibrator, load_slice_records, resolve_image_paths
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--onnx", type=Path, default=Path("models/yolo11n.onnx"))
+    parser.add_argument("--fp16-onnx", type=Path, default=None)
+    parser.add_argument("--int8-onnx", type=Path, default=None)
     parser.add_argument("--engines-dir", type=Path, default=Path("engines"))
     parser.add_argument("--workspace-gb", type=float, default=4.0)
-    parser.add_argument("--calib-slice", type=Path, default=Path("data/calib_slice.json"))
-    parser.add_argument("--calib-image-dir", type=Path, default=Path("data/train2017"))
-    parser.add_argument("--calib-cache", type=Path, default=Path("calib.cache"))
-    parser.add_argument("--calib-batch-size", type=int, default=8)
-    parser.add_argument("--input-size", type=int, default=640)
     parser.add_argument(
         "--model-name",
         type=str,
@@ -33,10 +27,8 @@ def parse_args() -> argparse.Namespace:
 
 def build_serialized_engine(
     onnx_path: Path,
-    precision: str,
     logger: trt.ILogger,
     workspace_bytes: int,
-    calibrator: CocoInt8EntropyCalibrator | None,
 ) -> bytes:
     builder = trt.Builder(logger)
     explicit_batch = getattr(trt.NetworkDefinitionCreationFlag, "EXPLICIT_BATCH", None)
@@ -56,23 +48,15 @@ def build_serialized_engine(
     else:
         config.max_workspace_size = workspace_bytes
 
-    if precision == "fp16":
-        config.set_flag(trt.BuilderFlag.FP16)
-    elif precision == "int8":
-        config.set_flag(trt.BuilderFlag.INT8)
-        if calibrator is None:
-            raise ValueError("INT8 requested but calibrator is None")
-        config.int8_calibrator = calibrator
-
     if hasattr(builder, "build_serialized_network"):
         plan = builder.build_serialized_network(network, config)
         if plan is None:
-            raise RuntimeError(f"TensorRT returned None while building {precision}")
+            raise RuntimeError(f"TensorRT returned None while building {onnx_path}")
         return bytes(plan)
 
     engine = builder.build_engine(network, config)
     if engine is None:
-        raise RuntimeError(f"TensorRT returned None while building {precision}")
+        raise RuntimeError(f"TensorRT returned None while building {onnx_path}")
     return bytes(engine.serialize())
 
 
@@ -87,39 +71,20 @@ def main() -> None:
     workspace_bytes = int(args.workspace_gb * (1 << 30))
     model_name = args.model_name or args.onnx.stem
 
-    calibrator = None
-    legacy_int8_available = hasattr(trt, "IInt8EntropyCalibrator2")
-    if not legacy_int8_available:
-        print(
-            "[warn] TensorRT removed IInt8EntropyCalibrator2; "
-            "legacy calibrator-based INT8 is unavailable. "
-            "FP32/FP16 will be built, INT8 will be skipped."
-        )
-    if not args.calib_slice.exists():
-        print(f"[warn] calibration slice missing: {args.calib_slice}")
-    elif legacy_int8_available:
-        records = load_slice_records(args.calib_slice)
-        image_paths = resolve_image_paths(records, args.calib_image_dir)
-        calibrator = CocoInt8EntropyCalibrator(
-            image_paths=image_paths,
-            cache_path=args.calib_cache,
-            input_hw=(args.input_size, args.input_size),
-            batch_size=args.calib_batch_size,
-        )
+    targets = [("fp32", args.onnx)]
+    if args.fp16_onnx is not None:
+        targets.append(("fp16", args.fp16_onnx))
+    if args.int8_onnx is not None:
+        targets.append(("int8", args.int8_onnx))
 
-    targets = ("fp32", "fp16", "int8")
-    for precision in targets:
-        if precision == "int8" and calibrator is None:
-            print("[skip] INT8 build skipped because this TensorRT API has no legacy calibrator")
-            continue
-
-        print(f"[build] precision={precision}")
+    for precision, onnx_path in targets:
+        if not onnx_path.exists():
+            raise FileNotFoundError(f"{precision} ONNX file not found: {onnx_path}")
+        print(f"[build] precision={precision} onnx={onnx_path}")
         plan = build_serialized_engine(
-            onnx_path=args.onnx,
-            precision=precision,
+            onnx_path=onnx_path,
             logger=logger,
             workspace_bytes=workspace_bytes,
-            calibrator=calibrator,
         )
 
         engine_path = args.engines_dir / f"{model_name}_{precision}.engine"
