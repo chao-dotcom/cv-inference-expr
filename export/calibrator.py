@@ -8,8 +8,35 @@ from typing import Iterable, Sequence
 
 import cv2
 import numpy as np
-import pycuda.driver as cuda
 import tensorrt as trt
+
+try:
+    import pycuda.driver as cuda
+
+    def allocate_device(size: int) -> object:
+        return cuda.mem_alloc(size)
+
+    def copy_to_device(destination: object, source: np.ndarray) -> None:
+        cuda.memcpy_htod(destination, source)
+except ModuleNotFoundError:
+    try:
+        from cuda import cuda
+    except ImportError:
+        from cuda.bindings import driver as cuda
+    init_error = cuda.cuInit(0)[0]
+    if init_error != cuda.CUresult.CUDA_SUCCESS:
+        raise RuntimeError(f"CUDA initialization failed: {init_error}")
+
+    def allocate_device(size: int) -> int:
+        error, pointer = cuda.cuMemAlloc(size)
+        if error != cuda.CUresult.CUDA_SUCCESS:
+            raise RuntimeError(f"CUDA allocation failed: {error}")
+        return int(pointer)
+
+    def copy_to_device(destination: int, source: np.ndarray) -> None:
+        error = cuda.cuMemcpyHtoD(destination, source, source.nbytes)
+        if error != cuda.CUresult.CUDA_SUCCESS:
+            raise RuntimeError(f"CUDA host-to-device copy failed: {error}")
 
 
 def letterbox_bgr(
@@ -84,7 +111,7 @@ class CocoInt8EntropyCalibrator(trt.IInt8EntropyCalibrator2):
         self.current_index = 0
         channels = 3
         elems_per_image = channels * input_hw[0] * input_hw[1]
-        self.device_input = cuda.mem_alloc(batch_size * elems_per_image * np.float32().nbytes)
+        self.device_input = allocate_device(batch_size * elems_per_image * np.float32().nbytes)
 
     def get_batch_size(self) -> int:
         return self.batch_size
@@ -105,7 +132,7 @@ class CocoInt8EntropyCalibrator(trt.IInt8EntropyCalibrator2):
                 raise RuntimeError(f"Failed to read calibration image: {image_path}")
             batch[i] = preprocess_to_chw_float(image, self.input_hw)
 
-        cuda.memcpy_htod(self.device_input, batch)
+        copy_to_device(self.device_input, batch)
         return [int(self.device_input)]
 
     def read_calibration_cache(self) -> bytes | None:

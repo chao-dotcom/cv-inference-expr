@@ -22,17 +22,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--val-count", type=int, default=1000)
     parser.add_argument("--calib-count", type=int, default=500)
     parser.add_argument("--timeout", type=int, default=30)
+    parser.add_argument(
+        "--insecure-downloads",
+        action="store_true",
+        help="Disable TLS verification for broken proxy certificates only.",
+    )
     return parser.parse_args()
 
 
-def download_file(url: str, destination: Path, timeout_s: int) -> None:
+def download_file(url: str, destination: Path, timeout_s: int, verify_tls: bool) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.exists() and destination.stat().st_size > 0:
         print(f"[skip] {destination} already exists")
         return
 
     print(f"[download] {url} -> {destination}")
-    with requests.get(url, stream=True, timeout=timeout_s) as response:
+    with requests.get(url, stream=True, timeout=timeout_s, verify=verify_tls) as response:
         response.raise_for_status()
         with destination.open("wb") as handle:
             for chunk in response.iter_content(chunk_size=1 << 20):
@@ -78,12 +83,18 @@ def download_images(
     url_template: str,
     destination_dir: Path,
     timeout_s: int,
+    verify_tls: bool,
 ) -> None:
     destination_dir.mkdir(parents=True, exist_ok=True)
     for record in records:
         file_name = str(record["file_name"])
         destination = destination_dir / file_name
-        download_file(url_template.format(file_name=file_name), destination, timeout_s=timeout_s)
+        download_file(
+            url_template.format(file_name=file_name),
+            destination,
+            timeout_s=timeout_s,
+            verify_tls=verify_tls,
+        )
 
 
 def main() -> None:
@@ -92,7 +103,12 @@ def main() -> None:
     data_dir.mkdir(parents=True, exist_ok=True)
 
     annotations_zip = data_dir / "annotations_trainval2017.zip"
-    download_file(ANNOTATIONS_URL, annotations_zip, timeout_s=args.timeout)
+    download_file(
+        ANNOTATIONS_URL,
+        annotations_zip,
+        timeout_s=args.timeout,
+        verify_tls=not args.insecure_downloads,
+    )
 
     val_instances, train_instances = extract_annotations(annotations_zip, data_dir)
     val_slice_path = data_dir / "val_slice.json"
@@ -106,8 +122,21 @@ def main() -> None:
     if overlap:
         raise ValueError(f"Evaluation and calibration slices overlap: {sorted(overlap)[:5]}")
 
-    download_images(val_slice, VAL_IMAGE_URL, data_dir / "val2017", timeout_s=args.timeout)
-    download_images(calib_slice, TRAIN_IMAGE_URL, data_dir / "train2017", timeout_s=args.timeout)
+    verify_tls = not args.insecure_downloads
+    download_images(
+        val_slice,
+        VAL_IMAGE_URL,
+        data_dir / "val2017",
+        timeout_s=args.timeout,
+        verify_tls=verify_tls,
+    )
+    download_images(
+        calib_slice,
+        TRAIN_IMAGE_URL,
+        data_dir / "train2017",
+        timeout_s=args.timeout,
+        verify_tls=verify_tls,
+    )
 
     print("[done] deterministic slices and required images are ready")
 

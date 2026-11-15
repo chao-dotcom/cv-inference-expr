@@ -9,13 +9,6 @@ from pathlib import Path
 
 import tensorrt as trt
 
-try:
-    import pycuda.autoinit  # noqa: F401
-except Exception as exc:  # pragma: no cover - environment dependent
-    raise RuntimeError(
-        "pycuda.autoinit import failed. Install pycuda in the CUDA environment before building engines."
-    ) from exc
-
 from calibrator import CocoInt8EntropyCalibrator, load_slice_records, resolve_image_paths
 
 

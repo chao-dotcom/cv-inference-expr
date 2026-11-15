@@ -29,29 +29,37 @@ image:
 
 ```bash
 !apt-get update -qq
-!apt-get install -y -qq libnvinfer-dev libnvinfer8 libopencv-dev cmake
+!apt-get install -y -qq libopencv-dev cmake
 !dpkg -l | grep -i nvinfer
 !find /usr /usr/local -name "NvInfer.h" 2>/dev/null
 ```
 
-If `libnvinfer-dev` is unavailable, install the matching NVIDIA Debian
-repository package using the CUDA major version printed in step 1. Do not
-continue with a Python-only installation. The documented fallback is a
-root-enabled GPU VM if the Colab image cannot provide matching headers and
-libraries.
+Colab commonly does not expose `libnvinfer-dev` through apt. The Python wheel
+also does not include C++ headers, so fetch the matching header tree for the
+harness and point CMake at the pip-installed TensorRT libraries:
+
+```bash
+!git clone --depth 1 -q https://github.com/NVIDIA/TensorRT.git /content/TensorRT
+```
+
+Do not continue with a Python-only installation unless you are skipping the
+C++ harness. A root-enabled GPU VM with the full TensorRT SDK is the fallback
+if the Colab TensorRT version and header tree are incompatible.
 
 ## 4. Install Python dependencies
 
 ```bash
 !python -m pip install -q --upgrade pip
-!pip install -q ultralytics onnx pycuda pycocotools requests opencv-python tensorrt
+!pip install -q ultralytics onnx pycocotools requests opencv-python tensorrt cuda-python
 !python -c "import tensorrt as trt; print('TensorRT', trt.__version__)"
+!python -c "import tensorrt_libs; print(tensorrt_libs.__file__)"
+!git clone --depth 1 -q https://github.com/NVIDIA/TensorRT.git /content/TensorRT
 ```
 
 ## 5. Prepare deterministic data
 
 ```bash
-!python export/download_coco_slice.py --val-count 1000 --calib-count 500
+!python export/download_coco_slice.py --val-count 1000 --calib-count 500 --insecure-downloads
 ```
 
 This downloads only the selected COCO images. The script asserts that the

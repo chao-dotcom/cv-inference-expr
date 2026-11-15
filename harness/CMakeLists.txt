@@ -8,8 +8,12 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(OpenCV REQUIRED)
 find_package(CUDAToolkit REQUIRED)
 
-find_path(TENSORRT_INCLUDE_DIR NvInfer.h)
-find_library(TENSORRT_LIB nvinfer)
+find_path(TENSORRT_INCLUDE_DIR NvInfer.h
+  HINTS "$ENV{TENSORRT_INCLUDE_DIR}"
+)
+find_library(TENSORRT_LIB nvinfer
+  HINTS "$ENV{TENSORRT_LIB_DIR}"
+)
 if(NOT TENSORRT_INCLUDE_DIR OR NOT TENSORRT_LIB)
   message(FATAL_ERROR "TensorRT not found. Install TensorRT C++ SDK and ensure NvInfer.h/libnvinfer are discoverable.")
 endif()
