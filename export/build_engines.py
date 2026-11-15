@@ -39,7 +39,8 @@ def build_serialized_engine(
     calibrator: CocoInt8EntropyCalibrator | None,
 ) -> bytes:
     builder = trt.Builder(logger)
-    network_flags = 1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
+    explicit_batch = getattr(trt.NetworkDefinitionCreationFlag, "EXPLICIT_BATCH", None)
+    network_flags = 0 if explicit_batch is None else 1 << int(explicit_batch)
     network = builder.create_network(network_flags)
     parser = trt.OnnxParser(network, logger)
 

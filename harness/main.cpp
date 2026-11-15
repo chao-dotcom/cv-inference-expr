@@ -553,15 +553,9 @@ int main(int argc, char** argv) {
                                 cudaMemcpyHostToDevice, stream),
                 "Benchmark H2D failed");
 
-<<<<<<< Updated upstream
-      const auto start = std::chrono::high_resolution_clock::now();
+      CheckCuda(cudaEventRecord(gpu_start, stream), "GPU start event failed");
       if (!context->enqueueV3(stream)) {
         throw std::runtime_error("enqueueV3 failed during benchmark");
-=======
-      CheckCuda(cudaEventRecord(gpu_start, stream), "GPU start event failed");
-      if (!context->enqueueV2(bindings.data(), stream, nullptr)) {
-        throw std::runtime_error("enqueueV2 failed during benchmark");
->>>>>>> Stashed changes
       }
       CheckCuda(cudaEventRecord(gpu_end, stream), "GPU end event failed");
       CheckCuda(cudaMemcpyAsync(timing_output.data(), device_output, output_elems * sizeof(float),
