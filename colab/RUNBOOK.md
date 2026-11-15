@@ -85,11 +85,11 @@ graph exists, add `--int8-onnx models/yolo11n_int8.onnx` to the build command.
 ## 7. Build the C++ harness
 
 ```bash
-!cmake -S harness -B harness/build
+!bash -lc 'set -e; TRT_HEADER=$(find / -name NvInfer.h 2>/dev/null | head -n 1); TRT_LIB=$(find / -name "libnvinfer.so*" -type f 2>/dev/null | head -n 1); test -n "$TRT_HEADER"; test -n "$TRT_LIB"; cmake -S harness -B harness/build -DTENSORRT_INCLUDE_DIR=$(dirname "$TRT_HEADER") -DTENSORRT_LIB="$TRT_LIB"'
 !cmake --build harness/build --parallel
 ```
 
-## 8. Run every precision
+## 8. Run FP32 and FP16
 
 The defaults are the fixed plan settings: confidence `0.001`, NMS IoU `0.7`,
 maximum 300 detections, 50 warmup iterations, and 1000 timed iterations.
@@ -98,15 +98,17 @@ Each run emits CUDA-event GPU latency, end-to-end latency, and a raw CSV.
 ```bash
 !./harness/build/trt_yolo_bench engines/yolo11n_fp32.engine data/val_slice.json --out results_fp32.json --latency-out latency_fp32.csv 2>&1 | tee bench_fp32.log
 !./harness/build/trt_yolo_bench engines/yolo11n_fp16.engine data/val_slice.json --out results_fp16.json --latency-out latency_fp16.csv 2>&1 | tee bench_fp16.log
-!./harness/build/trt_yolo_bench engines/yolo11n_int8.engine data/val_slice.json --out results_int8.json --latency-out latency_int8.csv 2>&1 | tee bench_int8.log
 ```
+
+INT8 is intentionally deferred here. TensorRT 11 requires an explicitly
+quantized ONNX graph containing Q/DQ nodes; the removed legacy calibrator cannot
+produce an INT8 engine. Build and benchmark FP32/FP16 first.
 
 ## 9. Score accuracy
 
 ```bash
 !python eval/score_coco.py --dets results_fp32.json | tee score_fp32.log
 !python eval/score_coco.py --dets results_fp16.json | tee score_fp16.log
-!python eval/score_coco.py --dets results_int8.json | tee score_int8.log
 ```
 
 Run the PyTorch reference on the exact same image list and thresholds:

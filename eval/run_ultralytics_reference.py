@@ -42,19 +42,27 @@ def main() -> None:
         raise FileNotFoundError(f"Missing evaluation image: {missing[0]}")
 
     model = YOLO(args.weights)
+    parameter_count = sum(parameter.numel() for parameter in model.model.parameters())
+    print(f"[info] weights={args.weights} params={parameter_count / 1e6:.1f}M")
     results = model.predict(
         source=[str(path) for path in image_paths],
         imgsz=args.imgsz,
+        batch=1,
+        half=True,
+        device=0,
         conf=0.001,
         iou=0.7,
         max_det=300,
+        stream=True,
         verbose=False,
     )
 
     detections: list[dict[str, object]] = []
-    if len(results) != len(image_ids):
-        raise RuntimeError(f"Model returned {len(results)} results for {len(image_ids)} images")
-    for image_id, result in zip(image_ids, results):
+    result_count = 0
+    for result_count, result in enumerate(results, start=1):
+        if result_count > len(image_ids):
+            raise RuntimeError(f"Model returned more than {len(image_ids)} results")
+        image_id = image_ids[result_count - 1]
         if result.boxes is None:
             continue
         boxes = result.boxes.xywh.cpu().tolist()
@@ -74,7 +82,10 @@ def main() -> None:
                 ],
                 "score": float(score),
             })
+    if result_count != len(image_ids):
+        raise RuntimeError(f"Model returned {result_count} results for {len(image_ids)} images")
 
+    args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(detections, indent=2), encoding="utf-8")
     print(f"[write] {args.out} detections={len(detections)}")
 

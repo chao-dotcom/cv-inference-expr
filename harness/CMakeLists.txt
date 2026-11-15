@@ -12,7 +12,7 @@ find_path(TENSORRT_INCLUDE_DIR NvInfer.h
   HINTS "$ENV{TENSORRT_INCLUDE_DIR}"
 )
 find_library(TENSORRT_LIB nvinfer
-  HINTS "$ENV{TENSORRT_LIB_DIR}"
+  HINTS "$ENV{TENSORRT_LIB_DIR}" "$ENV{TENSORRT_LIB}"
 )
 if(NOT TENSORRT_INCLUDE_DIR OR NOT TENSORRT_LIB)
   message(FATAL_ERROR "TensorRT not found. Install TensorRT C++ SDK and ensure NvInfer.h/libnvinfer are discoverable.")
